@@ -1,259 +1,167 @@
-[English](#english) | [中文](#中文)
+<div align="center">
 
----
+# 🔗 ws63-sdk-dev-skill
 
-<a id="english"></a>
+**WS63 SDK AI Agent 开发技能包**
 
-# ws63-sdk-dev
+让 AI 助手自动编译、看报错、修 Bug、重新编译，全程不用手动传话。
 
-A reusable skill for AI coding agents (Hermes Agent, Codex, Claude Code, etc.) to develop, build, debug, and verify firmware on **Huawei/HiSilicon WS63** (RISC-V + LiteOS) SDK workspaces.
+[![release](https://img.shields.io/badge/release-v1.0.0-blue?style=flat-square)](https://github.com/SlumberMin/ws63-sdk-dev-skill/releases)
+[![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=flat-square)]()
+[![skill](https://img.shields.io/badge/type-AI%20Skill-orange?style=flat-square)]()
+[![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)]()
 
-## What it covers
+**[English](#english)** · **[中文](#中文)**
 
-### 1. Build workflow
-
-- Primary build: `python build.py ws63-liteos-app -j4`
-- Clean rebuild (config changed): `python build.py -c ws63-liteos-app -j4`
-- Auto-detect SDK root by locating `build.py`, `config.in`, `ws63.json`
-- Multi-target workflow: build → save artifacts → reconfig → clean rebuild → build next
-- Success must be verified from both stdout markers AND artifact existence
-
-### 2. Menuconfig / Kconfig
-
-- Config chain: `sample Kconfig → osource → parent Kconfig → config.in → .config → mconfig.h → source code`
-- Agent-friendly approach: edit Kconfig files directly, clean rebuild with `-c`; only open TUI when user explicitly requests
-- Step-by-step guide for adding new config symbols (define → osource → code → rebuild)
-- Common pitfalls: declared-but-unused symbols, missing osource, stale mconfig.h
-
-### 3. GPIO pin mux
-
-- GPIO4 default mode is **SSI_CLK** (Mode0), not GPIO. Must call `uapi_pin_set_mode(S_MGPIO4, 2)`.
-- GPIO5 default mode is **SSI_DATA** (Mode0), not GPIO. Must call `uapi_pin_set_mode(S_MGPIO5, 4)`.
-- GPIO0–3, GPIO6–14: Mode0 is plain GPIO, direct use OK.
-- Unconfigured GPIO4/5 can cause **peripheral false-triggering at power-on**.
-- Always check vendor IO mux table before assigning any GPIO.
-- Some GPIOs have boot-mode pull-up/down requirements.
-
-### 4. Build failure diagnosis
-
-- Read the **first real** compiler/linker error, not the final `ninja: build stopped`
-- Single-root-cause loop: fix one error → rebuild → next error
-- Fix priority: missing macro → wrong include → duplicate symbol → API mismatch → encoding issue
-- After 3 failures on the same root cause: stop retrying, go back to research
-
-### 5. Boot log diagnosis
-
-- Flash Init Fail (0x80001341): flash communication or security key issue
-- `verify_public_rootkey secure verify disable`: normal for dev boards, not in secure boot mode
-- Serial terminal at 115200 baud, correlate error codes with vendor doc
-
-### 6. Burn package
-
-- Primary artifact: `output/ws63/fwpkg/ws63-liteos-app/ws63-liteos-app_all.fwpkg`
-- `.fwpkg` is the burn artifact, NOT `.bin`
-- Multi-artifact staging: save each build's fwpkg before the next clean build
-
-### 7. Sample hygiene
-
-- Dead file detection: find `.c` files not in CMakeLists SOURCES_LIST
-- Copy-paste artifacts: wrong `@brief` comments, reused config names, hardcoded pins
-- Shared protocol files: extract to common directory, use unique include guards
-- Font/tool artifacts: delete `node_modules/` after generating font `.c` files
-- Placeholder data: never fill missing sensor fields with unrelated values
-
-## Methodology
-
-### Five rules
-
-1. **Evidence before conclusions** — Read code, build scripts, Kconfig, and bundled SDK docs before proposing structural changes. Prefer a working sibling sample over memory or generic advice.
-2. **Prefer reuse over rewriting** — When something works in another sample, copy and adapt it. Do not reinvent.
-3. **Solve one root cause per round** — When the build is red, fix the first real error and rebuild before making more edits. Do not batch-edit.
-4. **Stop blind retries after three failures** — If the same root cause has already failed three times, stop repeating the same fix pattern. Return to research. Re-read sibling samples, local docs, and build scripts. Reframe the issue.
-5. **Keep changes minimal** — Do not call work done unless there is build, artifact, log, or hardware evidence.
-
-### Role split for large tasks
-
-- `Scout`: collect evidence and references only
-- `Builder`: edit code
-- `Verifier`: inspect outputs and decide whether evidence is enough
-- Only one writer should edit files at a time
-
-### Reference priority
-
-1. Current sample source code under `application/samples/`
-2. Local build scripts and target config
-3. Working sibling samples in the same SDK
-4. Official SDK docs bundled in the workspace
-5. Generated build outputs and logs
-6. External references only if local evidence is insufficient
-
-### No-install policy
-
-Do not install tools or Python packages unless the user explicitly asks. Report what's missing and let the user decide.
-
-### Output style
-
-When finishing a task, report:
-1. What changed
-2. Whether the build passed
-3. Which artifact to burn or inspect
-4. Any remaining risk (e.g., not tested on hardware)
-
-## Quick start
-
-### With Hermes Agent
-
-```bash
-cp -r ws63-sdk-dev ~/.hermes/skills/
-# Windows:
-# xcopy ws63-sdk-dev %USERPROFILE%\AppData\Local\hermes\skills\ws63-sdk-dev\ /E /I
-```
-
-### With Codex / Claude Code / other agents
-
-Place the `ws63-sdk-dev/` folder under your project's `.agents/skills/` directory.
-
-### In a prompt
-
-```
-Use $ws63-sdk-dev to fix this WS63 build failure.
-Use $ws63-sdk-dev to add a new sample and verify the build artifact.
-```
-
-## Structure
-
-```
-ws63-sdk-dev/
-├── SKILL.md                    # Main skill document (methodology + workflow)
-└── references/
-    └── ws63-reference.md       # Quick reference: commands, GPIO table, failure patterns
-```
+</div>
 
 ---
 
 <a id="中文"></a>
 
-# ws63-sdk-dev
+## 🚀 这是什么
 
-适用于 AI 编程助手（Hermes Agent、Codex、Claude Code 等）的通用技能，用于在**华为海思 WS63**（RISC-V + LiteOS）SDK 工作区中进行固件开发、构建、调试和验证。
+一个给 AI 编程助手用的**标准化技能文件**，加载后 AI 就能直接操作 WS63 SDK，不用你每次手把手教。
 
-## 覆盖内容
+**支持的 AI 工具：** Hermes Agent · Codex · Claude Code · Gemini CLI · OpenCode
 
-### 1. 编译流程
+> **核心能力：AI 自动跑编译 → 自己看 stdout 报错 → 定位第一个 error → 改代码 → 重新编译 → 循环到通过。**
 
-- 主编译命令：`python build.py ws63-liteos-app -j4`
-- 配置变更后 clean 重建：`python build.py -c ws63-liteos-app -j4`
-- 自动检测 SDK 根目录：定位 `build.py`、`config.in`、`ws63.json`
-- 多目标构建：编译 → 保存产物 → 重新配置 → clean 重建 → 编译下一个
-- 成功判定：必须同时看到 stdout 标记和产物文件存在
+### 🎯 解决的痛点
 
-### 2. Menuconfig / Kconfig
+以前用 AI 写 WS63 固件：
 
-- 配置链路：`sample Kconfig → osource → 父级 Kconfig → config.in → .config → mconfig.h → 源码`
-- Agent 优先方案：直接编辑 Kconfig 文件，`-c` clean 重建；仅在用户明确要求时才开 TUI
-- 新增配置项的完整步骤（定义 → osource → 源码引用 → 重建）
-- 常见坑：声明了但没用、缺 osource、mconfig.h 过期未重新生成
+- ❌ 编译报错了，要你把错误信息复制粘贴给它
+- ❌ 改完又报错，再复制一次，来回传话
+- ❌ AI 不知道 `.fwpkg` 才是烧录产物，拿 `.bin` 就说完成了
+- ❌ menuconfig 改了但没 clean rebuild，配置没生效
+- ❌ GPIO4/5 默认是 SSI 不是 GPIO，踩坑了才知道
 
-### 3. GPIO 引脚复用
+现在：
 
-- GPIO4 默认模式是 **SSI_CLK**（Mode0），不是 GPIO，必须调用 `uapi_pin_set_mode(S_MGPIO4, 2)`
-- GPIO5 默认模式是 **SSI_DATA**（Mode0），不是 GPIO，必须调用 `uapi_pin_set_mode(S_MGPIO5, 4)`
-- GPIO0–3、GPIO6–14：Mode0 就是 GPIO，可直接使用
-- GPIO4/5 未配置可能导致**上电时外设误触发**
-- 分配任何 GPIO 前必须查阅厂商 IO 复用表
-- 部分 GPIO 有 boot 模式的上下拉要求
+- ✅ AI 自己跑 `python build.py ws63-liteos-app -j4`
+- ✅ 自己读 stdout，找第一个真正的编译错误
+- ✅ 自己改代码，重新编译，循环到 `.fwpkg` 生成
+- ✅ 同一个问题修三次没过，自动停下来翻文档
+- ✅ GPIO4/5 的 SSI 坑写进了规则，不会再踩
 
-### 4. 编译失败诊断
+### 📦 覆盖内容
 
-- 读**第一个真正的**编译器/链接器错误，不是最后的 `ninja: build stopped`
-- 单根因循环：修一个错 → 重建 → 下一个
-- 修复优先级：缺宏 → include 路径错 → 重复符号 → API 不匹配 → 编码问题
-- 同一根因失败 3 次后：停止盲改，回到研究阶段
+| 模块 | 说明 |
+|------|------|
+| 🔨 编译流程 | `build.py` 命令、clean rebuild、多目标构建暂存 |
+| ⚙️ Menuconfig | Kconfig 链路、新增配置项步骤、常见坑 |
+| 📌 GPIO 复用 | GPIO4/5 SSI 规则、boot 引脚约束 |
+| 🐛 失败诊断 | 单根因循环：第一个 error → 改 → 重建 |
+| 📋 启动日志 | Flash Init Fail、安全验证错误码 |
+| 📦 烧录包 | `.fwpkg` 产物确认、多产物暂存 |
+| 🧹 工程卫生 | 死文件检测、复制粘贴残留清理 |
 
-### 5. 启动日志诊断
+### 💡 方法论
 
-- Flash Init Fail (0x80001341)：Flash 通信故障或安全密钥问题
-- `verify_public_rootkey secure verify disable`：开发板正常现象，表示未启用安全启动
-- 串口波特率 115200，将错误码与厂商文档对照
+```
+先看证据再动手 → 一次只修一个问题 → 三次失败停下来 → 用产物证明完成
+```
 
-### 6. 烧录包
-
-- 主要产物：`output/ws63/fwpkg/ws63-liteos-app/ws63-liteos-app_all.fwpkg`
-- 烧录用 `.fwpkg`，不是 `.bin`
-- 多产物暂存：每次构建后保存 fwpkg 再做下一次 clean 重建
-
-### 7. 工程卫生
-
-- 死文件检测：找出不在 CMakeLists SOURCES_LIST 中的 `.c` 文件
-- 复制粘贴残留：错误的 `@brief` 注释、复用的配置名、硬编码的引脚号
-- 共享协议文件：抽到公共目录，使用唯一的 include guard
-- 字体/工具产物：生成字体 `.c` 文件后删除 `node_modules/`
-- 占位数据：不要用无关数据填充缺失的传感器字段
-
-## 方法论
-
-### 五条铁律
-
-1. **先看证据再下结论** — 读代码、构建脚本、Kconfig 和 SDK 自带文档后再提方案。优先参考能跑的兄弟 sample，不要凭记忆或泛泛建议。
-2. **优先复用不要重写** — 其他 sample 里有能用的，复制适配即可，不要从头造。
-3. **一次只修一个根因** — 编译红了只修第一个真正的 error，rebuild 后再看下一个，不要批量编辑。
-4. **同一根因失败 3 次后停止盲改** — 停止重复同样的修复模式，回到研究阶段，重读兄弟 sample、本地文档和构建脚本，重新定义问题。
-5. **改动尽量小** — 没有构建成功、产物存在、日志通过或硬件验证，就不算完成。
-
-### 大任务角色分工
-
-- `Scout`：只收集证据和参考资料
-- `Builder`：编辑代码
-- `Verifier`：检查输出，判断证据是否充分
-- 同一时间只有一个写手在改文件
-
-### 参考资料优先级
-
-1. 当前 sample 源码 `application/samples/`
-2. 本地构建脚本和目标配置
-3. 同 SDK 下能跑的兄弟 sample
-4. SDK 自带文档
-5. 构建输出和日志
-6. 外部资料（本地不够才查）
-
-### 不自动装包
-
-发现缺依赖只报告，不自动安装，等用户决定。
-
-### 输出规范
-
-完成任务后报告：
-1. 改了什么
-2. 构建过没过
-3. 哪个产物可以烧录或检查
-4. 剩余风险（如未在硬件上测试）
-
-## 快速开始
-
-### Hermes Agent 使用
+### ⚡ 快速开始
 
 ```bash
-cp -r ws63-sdk-dev ~/.hermes/skills/
-# Windows:
-# xcopy ws63-sdk-dev %USERPROFILE%\AppData\Local\hermes\skills\ws63-sdk-dev\ /E /I
+# Hermes Agent
+cp -r ws63-sdk-dev-skill ~/.hermes/skills/
+
+# Codex / Claude Code（放到项目目录下）
+cp -r ws63-sdk-dev-skill .agents/skills/
 ```
 
-### Codex / Claude Code / 其他 agent 使用
-
-将 `ws63-sdk-dev/` 文件夹放到项目的 `.agents/skills/` 目录下。
-
-### 在提示词中调用
-
+提示词中使用：
 ```
-Use $ws63-sdk-dev to fix this WS63 build failure.
-Use $ws63-sdk-dev to add a new sample and verify the build artifact.
+Use $ws63-sdk-dev-skill to fix this WS63 build failure.
 ```
 
-## 目录结构
+### 📁 目录结构
 
 ```
-ws63-sdk-dev/
-├── SKILL.md                    # 主文档（方法论 + 完整工作流）
+ws63-sdk-dev-skill/
+├── SKILL.md                     # 主文档：方法论 + 完整工作流
 └── references/
-    └── ws63-reference.md       # 快速参考：命令、GPIO 表、常见失败模式
+    └── ws63-reference.md        # 快速参考：命令、GPIO 表、失败模式
 ```
+
+---
+
+<a id="english"></a>
+
+## 🚀 What is this
+
+A standardized **AI Agent skill file** for WS63 SDK development. Load it and the AI can operate the build system directly — no manual error copy-pasting needed.
+
+**Supported AI tools:** Hermes Agent · Codex · Claude Code · Gemini CLI · OpenCode
+
+> **Core capability: AI runs build → reads stdout errors → locates first error → fixes code → rebuilds → loops until `.fwpkg` is generated.**
+
+### 🎯 What it solves
+
+Before:
+- ❌ Copy-pasting compiler errors to the AI every time
+- ❌ AI doesn't know `.fwpkg` is the real burn artifact
+- ❌ Config changes without clean rebuild
+- ❌ GPIO4/5 defaults to SSI mode, not GPIO
+
+After:
+- ✅ AI runs `python build.py ws63-liteos-app -j4` and reads output itself
+- ✅ Finds the first real error, fixes it, rebuilds, loops
+- ✅ Stops after 3 failures on the same root cause, goes back to research
+- ✅ GPIO mux rules built into the skill
+
+### 📦 Coverage
+
+| Module | Description |
+|--------|-------------|
+| 🔨 Build | `build.py` commands, clean rebuild, multi-target staging |
+| ⚙️ Menuconfig | Kconfig chain, adding symbols, common pitfalls |
+| 📌 GPIO Mux | GPIO4/5 SSI rules, boot-mode pin constraints |
+| 🐛 Failure Diagnosis | Single-root-cause loop: fix first error → rebuild |
+| 📋 Boot Log | Flash Init Fail, security verification codes |
+| 📦 Burn Package | `.fwpkg` artifact verification |
+| 🧹 Hygiene | Dead file detection, copy-paste cleanup |
+
+### 💡 Methodology
+
+```
+Evidence before conclusions → One root cause per round → Stop after 3 failures → Verify with artifacts
+```
+
+### ⚡ Quick start
+
+```bash
+# Hermes Agent
+cp -r ws63-sdk-dev-skill ~/.hermes/skills/
+
+# Codex / Claude Code (place under project directory)
+cp -r ws63-sdk-dev-skill .agents/skills/
+```
+
+Use in prompts:
+```
+Use $ws63-sdk-dev-skill to fix this WS63 build failure.
+```
+
+### 📁 Structure
+
+```
+ws63-sdk-dev-skill/
+├── SKILL.md                     # Main document: methodology + full workflow
+└── references/
+    └── ws63-reference.md        # Quick reference: commands, GPIO table, failure patterns
+```
+
+---
+
+<div align="center">
+
+**⭐ 觉得有用就点个 Star 吧！ · Star this repo if you find it useful!**
+
+[![GitHub stars](https://img.shields.io/github/stars/SlumberMin/ws63-sdk-dev-skill?style=social)](https://github.com/SlumberMin/ws63-sdk-dev-skill/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/SlumberMin/ws63-sdk-dev-skill?style=social)](https://github.com/SlumberMin/ws63-sdk-dev-skill/issues)
+
+</div>
