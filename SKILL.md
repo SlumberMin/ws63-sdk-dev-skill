@@ -82,6 +82,15 @@ Prefer docs shipped inside the workspace, especially paths like:
 
 ## 5. What to inspect by task type
 
+### WS63 API quirks
+
+Read [references/ws63-api-quirks.md](references/ws63-api-quirks.md) when you need:
+- RISC-V interrupt control (`LOS_IntLock` — NOT ARM `__disable_irq`)
+- UART 5-parameter init (field is `baud_rate` not `baudrate`)
+- ADC single-shot (`uapi_adc_manual_sample` — NOT `uapi_adc_read`)
+- Socket close (`closesocket` — NOT `close` or `lwip_close`)
+- GPIO mux rules (GPIO4/5 need explicit pin mode set)
+
 ### Display tasks
 
 Inspect:
@@ -126,6 +135,53 @@ Inspect:
 - GPIO4/5 left unconfigured can cause **peripheral false-triggering at power-on** due to SSI signal activity.
 - **Always check the vendor IO mux table** for the definitive mapping before assigning any GPIO.
 - **Boot-mode pins**: some GPIOs have pull-up/down requirements at boot. If a peripheral holds the wrong level during reset, the chip may enter download mode instead of running firmware.
+
+### Power-on pull-up prohibition
+
+These GPIOs **must NOT be pulled high by hardware before power-on**. A hardware pull-up on any of these pins can prevent the chip from booting normally:
+
+- GPIO1, GPIO3, GPIO4, GPIO6, GPIO9, GPIO11
+
+If your schematic has external pull-ups or pull-downs on these pins, remove the pull-up before power-on.
+
+### Choose pins by peripheral (Mode selection)
+
+When the user asks for a peripheral pinout, use this table to select the right GPIO and Mode:
+
+**PWM (Mode1):**
+- GPIO0 → PWM0
+- GPIO1 → PWM1 ⚠️ no hardware pull-up before power-on
+- GPIO2 → PWM2
+- GPIO3 → PWM3 ⚠️ no hardware pull-up before power-on
+- GPIO4 → PWM4 ⚠️ no hardware pull-up before power-on
+- GPIO5 → PWM5
+- GPIO6 → PWM6 ⚠️ no hardware pull-up before power-on
+- GPIO7 → PWM7
+- GPIO8 → PWM0
+- GPIO9 → PWM1 ⚠️ no hardware pull-up before power-on
+- GPIO10 → PWM2
+- GPIO11 → PWM3 ⚠️ no hardware pull-up before power-on
+- GPIO12 → PWM4
+
+**I2C (Mode3):**
+- UART1_TXD → I2C1_SDA
+- UART1_RXD → I2C1_SCL
+- UART0_TXD → I2C0_SDA
+- UART0_RXD → I2C0_SCL
+
+**SPI (default Mode0 = SSI, or Mode3/4/5/6/7 for other roles):**
+- GPIO4 (Mode0) → SSI_CLK ⚠️ no hardware pull-up before power-on
+- GPIO5 (Mode0) → SSI_DATA
+- GPIO0 (Mode4) → SPI1_CSN
+- GPIO1 (Mode3) → SPI1_IO0 ⚠️ no hardware pull-up before power-on
+- GPIO3 (Mode3) → SPI1_IO1 ⚠️ no hardware pull-up before power-on
+- GPIO2 (Mode3) → SPI1_IO3
+- GPIO6 (Mode3) → SPI1_SCK, (Mode7) → SPI0_OUT ⚠️ no hardware pull-up before power-on
+- GPIO10 (Mode3) → SPI0_CS0_N
+- GPIO11 (Mode4) → SPI0_IN ⚠️ no hardware pull-up before power-on
+- GPIO9 (Mode4) → SPI0_OUT ⚠️ no hardware pull-up before power-on
+
+**Always check the vendor IO mux table for the definitive mapping.**
 
 ## 6. Official WS63 SDK build method
 
@@ -219,6 +275,15 @@ When building for multiple configurations in sequence:
 4. Build the second target
 5. Verify all artifacts exist
 
+**WS63 multi-node workflow**: Only one `app_run()` entry point can be active per build. To switch between nodes (e.g. gateway_ui → iiczm → envir):
+```bash
+# Edit .config directly (faster than menuconfig)
+sed -i 's/CONFIG_SAMPLE_SUPPORT_GATEWAY_UI=y/# CONFIG_SAMPLE_SUPPORT_GATEWAY_UI is not set/' .config
+sed -i 's/# CONFIG_SAMPLE_SUPPORT_IICZM is not set/CONFIG_SAMPLE_SUPPORT_IICZM=y/' .config
+python build.py -c ws63-liteos-app -j4
+```
+Each node has its own `xxx_main.c` with `app_run(xxx_entry)`. The build system compiles whichever `SAMPLE_SUPPORT_*` is enabled.
+
 ### Menuconfig config chain
 
 The config flows through these files:
@@ -276,6 +341,57 @@ Helpful additional success signals:
 
 Do not claim success from partial object-file compilation alone.
 
+## 8b. RISC-V API Pitfalls (WS63 is NOT ARM)
+
+WS63 uses RISC-V (rv32imfc), NOT ARM. CMSIS ARM intrinsics do NOT exist.
+
+### Interrupt control — `los_hwi.h`
+
+| ❌ ARM (DO NOT USE) | ✅ RISC-V WS63 | Header |
+|---------------------|----------------|--------|
+| `__get_PRIMASK()` / `__disable_irq()` | `LOS_IntLock()` → `uint32_t` | `los_hwi.h` |
+| `__set_PRIMASK(x)` | `LOS_IntRestore(x)` | `los_hwi.h` |
+
+### UART API — 5 arguments, `.baud_rate`
+
+```c
+#include "uart.h"
+uart_pin_config_t pins = { .tx_pin = 7, .rx_pin = 8, .cts_pin = PIN_NONE, .rts_pin = PIN_NONE };
+uart_attr_t attr = { .baud_rate = 9600, .data_bits = UART_DATA_BIT_8, .stop_bits = UART_STOP_BIT_1, .parity = UART_PARITY_NONE };
+uapi_uart_init(bus, &pins, &attr, NULL, NULL);  // 5 args!
+```
+**Field is `.baud_rate` (underscore), NOT `.baudrate`.**
+
+### ADC API — `uapi_adc_manual_sample()`
+
+```c
+#include "adc.h"
+uapi_adc_init(0);  // clock=0 default
+uapi_adc_open_channel(ch);
+int32_t raw = uapi_adc_manual_sample(ch);  // 0~4095 or <0 on error
+```
+**There is NO `uapi_adc_read()`. Use `uapi_adc_manual_sample()`.**
+
+### NULL on RISC-V
+
+Some SDK headers don't pull in `<stddef.h>`. Add it explicitly when `NULL` is undeclared.
+
+## 8c. Multi-Node Build Workflow
+
+When verifying multiple mutually-exclusive samples (e.g. gateway_ui + 3 node types):
+
+1. Edit `build/config/target_config/ws63/menuconfig/acore/ws63_liteos_app.config`:
+   ```bash
+   sed -i 's/CONFIG_SAMPLE_SUPPORT_OLD=y/# CONFIG_SAMPLE_SUPPORT_OLD is not set/' .config
+   sed -i 's/# CONFIG_SAMPLE_SUPPORT_NEW is not set/CONFIG_SAMPLE_SUPPORT_NEW=y/' .config
+   ```
+2. Clean rebuild: `python build.py -c ws63-liteos-app -j4`
+3. Verify both success markers
+4. Stage artifacts if needed before switching
+5. Repeat for each sample
+
+**Pitfall**: The `.config` file is the source of truth, NOT the Kconfig file. Editing Kconfig alone does nothing — you MUST also update `.config`.
+
 ## 9. How to inspect build failures
 
 When a build fails:
@@ -285,7 +401,7 @@ When a build fails:
    - missing macro or Kconfig symbol
    - wrong include path or wrong header
    - duplicated symbol or static vs non-static mismatch
-   - API mismatch against this SDK version
+   - API mismatch against this SDK version (check RISC-V pitfalls above)
    - encoding or generated-file issue
 3. Rebuild and re-check the next failure.
 
@@ -350,6 +466,9 @@ Remember:
 - **Declared but not used**: A Kconfig symbol exists but source code still has hardcoded `#define`. The config has no effect until code is changed to use `CONFIG_*`.
 - **Missing osource**: Parent Kconfig does not `osource` the child, so the symbol never enters the build.
 - **Stale mconfig.h**: After editing Kconfig, a normal rebuild may use cached `mconfig.h`. Always use `-c` for config changes.
+- **🔴 CMakeLists.txt not updated after Kconfig rename**: When renaming `config OLD_NAME` to `config NEW_NAME`, ALL `if(DEFINED CONFIG_OLD_NAME)` checks in CMakeLists.txt must also change to `CONFIG_NEW_NAME`. If forgotten, the `if` block silently evaluates to false and ALL source files inside it are skipped from compilation — no error, just missing symbols at link time. This caused gateway_ui's LCD/driver/font files (14 .c files) to be completely excluded from the build. **Verification**: after a rename, grep the CMakeLists.txt for the old name; if any hits remain, the build is broken.
+- **🔴 `.config` file must match Kconfig rename**: The build config at `build/config/target_config/ws63/menuconfig/acore/ws63_liteos_app.config` must also be updated: change `CONFIG_OLD_NAME=y` to `CONFIG_NEW_NAME=y`. Without this, the Kconfig symbol defaults to `n` and the feature is disabled.
+- **🔴 Renaming Kconfig symbols**: When renaming `config OLD_NAME` to `config NEW_NAME` in Kconfig, you MUST ALSO update the build config file at `build/config/target_config/ws63/menuconfig/acore/ws63_liteos_app.config`. Change `CONFIG_OLD_NAME=y` to `CONFIG_NEW_NAME=y`. If you forget, the build will silently skip the feature — no error, just missing code in the binary. The `.config` file is the source of truth for which symbols are enabled; Kconfig only defines what's *available*.
 
 ## 11. No-install policy
 
@@ -414,7 +533,240 @@ For larger multi-file work, also report:
 
 Keep the summary short and evidence-based.
 
-## 15. Read-on-demand reference
+## 15. Companion Flutter App (BLE Control)
+
+The WS63 project includes a Flutter mobile app at `smart_home_app/` that connects to the gateway via BLE. When updating the app, the protocol payloads in Dart MUST match the firmware's `gateway_frame.h` exactly.
+
+### BLE GATT structure
+
+| UUID | Role | Direction |
+|------|------|-----------|
+| 0xFF00 | Service | — |
+| 0xFF01 | CTRL (write) | APP→Gateway |
+| 0xFF02 | STATUS (notify) | Gateway→APP |
+| 0xFF03 | SYNC (optional) | — |
+
+Gateway broadcasts as `"SmartEdge_GW"`. App uses `flutter_blue_plus` + `flutter_riverpod`.
+
+### Protocol alignment pitfalls (DO NOT repeat)
+
+When the firmware changes, the app's `frame.dart` must be updated to match. Common mismatches discovered:
+
+- `lightOn` payload is `[0xFF]` (restore last brightness), NOT `[lightType]`
+- `lightOff` has NO payload, NOT `[lightType]`
+- `colorTemp` is a single byte `[cct%]` (0=cold, 100=warm), NOT `[warm, cold]` two bytes
+- `sceneExec` has NO payload, NOT `[sceneId, delayHi, delayLo]`
+- `sensorReadReply` (0x46) is 10 bytes (T×2, H×2, L×2, CO2×2, TVOC×2), NOT 6
+- `relayStateReport` (0x44) is 4 bytes (mask, key, irLen, irSlotMask), NOT 1
+- IR learn command is `paramConfig(0xF0)` + `[0x01, slot]`, NOT `[0x01]` alone
+
+### Verification
+
+After updating the app, always run `flutter analyze --no-pub` from the `smart_home_app/` directory. Target: 0 errors, 0 warnings.
+
+For detailed protocol mapping, read [references/flutter-app-ble-protocol.md](references/flutter-app-ble-protocol.md).
+
+## 16. Project directory restructuring (inc/src pattern)
+
+When reorganizing a flat sample into `inc/` + `src/` subdirectories:
+
+### Critical: PUBLIC_HEADER propagation chain
+
+`include_directories()` in a subdirectory CMakeLists.txt does **NOT** affect compilation of sources at the parent level. In the WS63 SDK, sources are compiled as part of the top-level component target (e.g. `samples`), not in the subdirectory scope.
+
+**The fix**: export headers via `PUBLIC_HEADER` at EVERY level:
+
+```cmake
+# In leaf CMakeLists.txt (e.g. gateway_ui/)
+set(PUBLIC_HEADER "${PUBLIC_HEADER}" "${CMAKE_CURRENT_SOURCE_DIR}/inc" PARENT_SCOPE)
+
+# In middle CMakeLists.txt (e.g. mydemo/) — MUST also propagate!
+set(PUBLIC_HEADER "${PUBLIC_HEADER}" PARENT_SCOPE)
+```
+
+**Pitfall**: The `mydemo/CMakeLists.txt` only had `set(SOURCES "..." PARENT_SCOPE)` and was missing the PUBLIC_HEADER line. This caused `fatal error: xxx.h: No such file or directory` for all headers in `inc/`.
+
+### Recommended directory layout for complex samples
+
+```
+sample_name/
+├── CMakeLists.txt       # Conditional compilation + PUBLIC_HEADER export
+├── Kconfig              # Organized with menu/endmenu blocks
+├── inc/                 # All public headers (flat includes still work)
+├── src/                 # Application source
+│   ├── xxx_main.c       # Entry point (app_run)
+│   ├── protocol/        # Communication protocol
+│   ├── ble/             # BLE-related
+│   ├── sle/             # SLE-related
+│   ├── wifi/            # WiFi/MQTT
+│   └── lvgl/            # UI + display drivers
+├── drivers/             # Board-level peripheral drivers
+├── fonts/               # Font resources
+├── docs/                # Documentation
+└── tools/               # Build tools (lv_font_conv etc.)
+```
+
+### Verification after restructuring
+
+```bash
+# All .c files referenced in CMakeLists.txt must exist
+grep 'CMAKE_CURRENT_SOURCE_DIR' CMakeLists.txt | grep -oP '/[^"]+\.c' | while read f; do
+    test -f ".$f" && echo "✓ .$f" || echo "✗ MISSING .$f"
+done
+```
+
+## 17. Memory optimization (WS63 — 544KB SRAM)
+
+### SRAM budget
+
+WS63 has 544KB total SRAM. After WiFi pkt_ram (48KB), system stacks (6KB), and preserve (256B), ~489KB is available for application + heap.
+
+### Top memory consumers
+
+| Consumer | Typical size | Optimization |
+|----------|-------------|-------------|
+| LCD frame buffer | 240×140×2 = 65.6KB | Reduce to 240×40×2 = 19.2KB (saves 46KB, more flushes but imperceptible) |
+| Main task stack (LVGL) | 64KB | Reduce to 32KB (LVGL peak ~16-24KB) |
+| LVGL heap (runtime) | 30-60KB | Reduce object create/destroy, use hide/show instead |
+| SLE/BLE protocol stack | 20-40KB | SDK internal, not directly controllable |
+| MQTT task stack | 8KB | Reduce to 6KB |
+| LVGL draw layer + thread | 16KB | lv_conf.h: LV_DRAW_LAYER_SIMPLE_BUF_SIZE |
+
+### Root cause of random resets
+
+Not static allocation — it's **runtime heap fragmentation + peak overlap**:
+- LVGL rendering allocates draw buffers + layer buffers
+- SLE connection setup has SDK-internal temporary allocations
+- MQTT JSON serialization uses stack space (512B × call depth)
+- When all three happen simultaneously → heap exhaustion → watchdog reset
+
+### Quick wins (3 changes, ~80KB saved)
+
+```
+lv_port_disp.c:  buf1[WIDTH * 140 * 2]  →  buf1[WIDTH * 40 * 2]   (save 46KB)
+main.c:          STACK_SIZE = 0x10000    →  STACK_SIZE = 0x8000    (save 32KB)
+gateway_mqtt.c:  STACK_SIZE = 0x2000     →  STACK_SIZE = 0x1800    (save 2KB)
+```
+
+### Flash optimization
+
+Remove unused fonts: `font_cn_14.c` and `font_cn_20.c` are often not referenced but compiled. Saves ~130KB Flash. Disable LVGL built-in CJK fonts (`LV_FONT_SOURCE_HAN_SANS_SC_*_CJK=0`) if custom font_cn_* fonts are used. Saves ~200KB Flash.
+
+For detailed memory analysis, read [references/ws63-memory-optimization.md](references/ws63-memory-optimization.md).
+
+## 18. Embedded HTTP server on WS63
+
+WS63 SDK does **NOT** include LWIP httpd module. The LWIP source in the SDK is stripped of application-layer modules.
+
+**Viable approach**: BSD socket API is fully supported. Write a lightweight HTTP server (~300 lines) using `socket()/bind()/listen()/accept()/send()/recv()`.
+
+Reference implementation path: `middleware/utils/at/at_wifi_cmd/at/at_sendtest.c` has a working TCP server example.
+
+For WiFi SoftAP mode, reference: `application/samples/wifi/softap_sample/softap_sample.c` (DHCP server, `192.168.43.1` gateway).
+
+Memory budget for HTTP server: ~9KB SRAM (4KB task stack + 4KB TCP buffers + 1KB parse buffer) + ~8KB Flash (embedded HTML).
+
+## 19. Schematic-driven code adaptation
+
+When new PCB schematics are available (PDF), use this workflow to adapt firmware pin assignments:
+
+### Step 1: Extract pin assignments from schematic PDFs
+```bash
+# Convert PDF to image using pymupdf
+python -c "import fitz; doc=fitz.open('schematic.pdf'); page=doc[0]; pix=page.get_pixmap(dpi=200); pix.save('schematic.png')"
+```
+Then use `vision_analyze` to read the PNG and extract GPIO assignments.
+
+### Step 2: Build a pin comparison table
+Create a table comparing Kconfig defaults vs schematic reality:
+| Function | Kconfig Default | Schematic Actual | Status |
+
+### Step 3: Update in order
+1. **Header files** — hardcoded `#define XXX_PIN N` values
+2. **Kconfig** — default values for `int` config symbols
+3. **Source code** — any `CONFIG_*` macro references that changed names
+4. **Pin mux logic** — shared pins need special handling
+
+### Pin mux conflicts (GPIO shared between peripherals)
+When a GPIO is shared (e.g. I2C SDA + LCD CS on same pin):
+- **Option A**: Keep one peripheral permanently active (e.g. LCD CS = GPIO output LOW, always selected)
+- **Option B**: Switch pin mode before/after each transaction (higher overhead)
+- **Option C**: Use the peripheral that doesn't need toggling (I2C needs toggling, CS can be static → choose static CS)
+
+In the gateway_ui example: GPIO_10 is shared between I2C SDA (touch+gesture) and LCD CS. Solution: configure as GPIO output LOW (LCD always selected), let I2C drivers reconfigure to I2C mode when needed. The LCD SPI bus is arbitrated via SD card CS (GPIO_05) separately.
+
+### 🔴 Pitfall: NEVER trust schematic readings without user verification
+PDF schematic analysis (via vision_analyze or OCR) is unreliable for pin assignments. ALWAYS present the extracted pin table to the user and get explicit confirmation before writing code. One wrong GPIO number can cause hardware damage (e.g. driving a relay on the wrong pin).
+
+**Real example**: vision_analyze read GPIO_12 as I2C SCL and GPIO_10 as LCD CS sharing I2C SDA. The user corrected: SCL=GPIO_16, SDA=GPIO_15, LCD CS=GPIO_10 (dedicated, not shared). Every single pin was wrong.
+
+**Workflow**:
+1. Extract pins from schematic PDF using vision_analyze
+2. Present pin table to user in a clear format
+3. Wait for user to confirm or correct
+4. Only THEN update Kconfig defaults and header #defines
+
+### 🔴 Pitfall: Appending vs overwriting files
+When the user says "在后面加" (append) or "在下面加" (add below), use `patch` mode to append content. NEVER use `write_file` to "add" content — it overwrites the entire file. Read the file first to find the last line, then patch from that anchor.
+
+### 🔴 Pitfall: Preserving Chinese comments and documentation
+The user communicates in Chinese and expects Chinese comments in code and documentation. When editing code:
+- Do NOT replace Chinese comments with English
+- Do NOT delete Chinese documentation files
+- Keep existing `/* 中文注释 */` style
+- New comments should be in Chinese when the codebase uses Chinese
+
+### Kconfig naming conventions
+Replace hardware-revision-specific prefixes with generic module names:
+- `LCDV427_SPI_DATA_PIN` → `LCD_SPI_DATA_PIN`
+- `LCDV427_TOUCH_*` → `TOUCH_*`
+- `LCDV427_SUPPORT` → `LCD_SUPPORT`
+
+This requires updating ALL references in .c/.h files and Kconfig simultaneously. Use `grep -rl 'OLD_NAME' . | xargs sed -i 's/OLD_NAME/NEW_NAME/g'` and verify with `grep -r 'OLD_NAME' .` returning zero results.
+
+**🔴 Three-way rename (Kconfig + .config + CMakeLists.txt)**:
+1. Kconfig: `config OLD_NAME` → `config NEW_NAME`
+2. `.config` file: `CONFIG_OLD_NAME=y` → `CONFIG_NEW_NAME=y`
+3. **CMakeLists.txt**: `if(DEFINED CONFIG_OLD_NAME)` → `if(DEFINED CONFIG_NEW_NAME)` (ALL occurrences)
+
+Missing step 3 causes all source files inside the `if` block to be silently excluded — 14 .c files can disappear from the build with zero compiler errors, only undefined symbols at link time.
+
+## 20. LVGL font management pitfalls
+
+### Enabling fonts that code references
+If build fails with `'lv_font_montserrat_N' undeclared`, check `lv_conf.h`:
+- `LV_FONT_MONTSERRAT_N` must be `1` (not `0`)
+- Common mistake: code uses `montserrat_16` but lv_conf.h has it disabled
+
+### Disabling unused built-in fonts to save Flash
+Each enabled Montserrat font adds ~16-20KB Flash. Each CJK font adds ~100KB.
+- Check which fonts the code actually uses: `grep -oh 'lv_font_montserrat_[0-9]*' *.c | sort -u`
+- Disable unused ones in lv_conf.h
+- If custom font files (font_cn_*.c) exist, disable `LV_FONT_SOURCE_HAN_SANS_SC_*_CJK` to save ~200KB Flash
+- Remove font .c files from CMakeLists.txt that aren't referenced
+
+## 21. Read-on-demand references
+
+Read [references/gateway-pinout.md](references/gateway-pinout.md) when you need:
+
+- the confirmed GPIO assignments for the gateway core board (as of 2026-06-14)
+- SPI/I2C bus sharing topology
+- peripheral pin mapping (LCD, touch, gesture, SD, buzzer, keys, audio)
+
+Read [references/ws2812-driver-pattern.md](references/ws2812-driver-pattern.md) when you need:
+- WS2812B bit-bang driver implementation for WS63 (timing, IRQ handling, brightness)
+- GRB pixel format and color constants
+
+Read [references/ws63-peripheral-api.md](references/ws63-peripheral-api.md) when you need:
+
+- GPIO/I2C/UART/ADC/PWM/SPI API code patterns with correct argument counts and field names
+- RISC-V interrupt control (LOS_IntLock/Restore)
+- Timing functions (osal_msleep, uapi_tcxo_delay_us)
+
+Read [references/schematic-to-code-workflow.md](references/schematic-to-code-workflow.md) when you need:
+- step-by-step process for adapting firmware to new PCB schematics
+- common peripherals for each node type (lighting, environment, appliance, security)
+- pin assignment table format conventions
 
 Read [references/ws63-reference.md](references/ws63-reference.md) when you need:
 
@@ -422,3 +774,10 @@ Read [references/ws63-reference.md](references/ws63-reference.md) when you need:
 - artifact checklist
 - local reference priority
 - common WS63 SDK failure patterns
+
+Read [references/flutter-app-ble-protocol.md](references/flutter-app-ble-protocol.md) when you need:
+
+- complete command/data mapping between firmware C and Flutter Dart
+- BLE GATT UUID table
+- node address and type definitions
+- sensor data byte layouts

@@ -79,23 +79,58 @@ source code             ← #ifdef CONFIG_FOO
 
 ## GPIO Mux Quick Reference
 
-| GPIO | Mode0 (default) | GPIO mode needed | Notes |
-|------|-----------------|------------------|-------|
-| GPIO0 | GPIO | Mode0 | Direct use OK |
-| GPIO1 | GPIO | Mode0 | Direct use OK |
-| GPIO2 | GPIO | Mode0 | Direct use OK |
-| GPIO3 | GPIO | Mode0 | Direct use OK |
-| **GPIO4** | **SSI_CLK** | **Mode2** | **Must call uapi_pin_set_mode()** |
-| **GPIO5** | **SSI_DATA** | **Mode4** | **Must call uapi_pin_set_mode()** |
-| GPIO6 | GPIO | Mode0 | Direct use OK |
-| GPIO7 | GPIO | Mode0 | Direct use OK |
-| GPIO8 | GPIO | Mode0 | Direct use OK |
-| GPIO9 | GPIO | Mode0 | Direct use OK |
-| GPIO10 | GPIO | Mode0 | Direct use OK |
-| GPIO11 | GPIO | Mode0 | Direct use OK |
-| GPIO12 | GPIO | Mode0 | Direct use OK |
-| GPIO13 | GPIO | Mode0 | Direct use OK |
-| GPIO14 | GPIO | Mode0 | Direct use OK |
+| GPIO | Mode0 (default) | GPIO mode | Notes |
+|------|-----------------|-----------|-------|
+| GPIO0 | GPIO | Mode0 | PWM0 (Mode1), SPI1_CSN (Mode4) |
+| **GPIO1** | GPIO | Mode0 | **PWM1 (Mode1), SPI1_IO0 (Mode3) — no hardware pull-up before power-on** |
+| GPIO2 | GPIO | Mode0 | PWM2 (Mode1), SPI1_IO3 (Mode3) |
+| **GPIO3** | GPIO | Mode0 | **PWM3 (Mode1), SPI1_IO1 (Mode3) — no hardware pull-up before power-on** |
+| **GPIO4** | **SSI_CLK** | **Mode2** | **PWM4 (Mode1), JTAG_ENABLE (Mode5) — no hardware pull-up before power-on** |
+| GPIO5 | SSI_DATA | Mode4 | PWM5 (Mode1), SPI0_IN (Mode5) |
+| **GPIO6** | GPIO | Mode0 | **PWM6 (Mode1), SPI1_SCK (Mode3), SPI0_OUT (Mode7) — no hardware pull-up before power-on** |
+| GPIO7 | GPIO | Mode0 | PWM7 (Mode1), SPI0_SCK (Mode3) |
+| GPIO8 | GPIO | Mode0 | PWM0 (Mode1), SPI0_CS1_N (Mode3) |
+| **GPIO9** | GPIO | Mode0 | **PWM1 (Mode1), SPI0_OUT (Mode4), I2S_DO (Mode5) — no hardware pull-up before power-on** |
+| GPIO10 | GPIO | Mode0 | PWM2 (Mode1), SPI0_CS0_N (Mode3) |
+| **GPIO11** | GPIO | Mode0 | **PWM3 (Mode1), SPI0_IN (Mode4), I2S_LRCLK (Mode5) — no hardware pull-up before power-on** |
+| GPIO12 | GPIO | Mode0 | PWM4 (Mode1), I2S_DI (Mode5) |
+| GPIO13 | GPIO | Mode0 | UART1_CTS (Mode1) |
+| GPIO14 | GPIO | Mode0 | UART1_RTS (Mode1) |
+| UART1_TXD | UART1_TXD | Mode3 | I2C1_SDA |
+| UART1_RXD | UART1_RXD | Mode3 | I2C1_SCL |
+| UART0_TXD | UART0_TXD | Mode3 | I2C0_SDA |
+| UART0_RXD | UART0_RXD | Mode3 | I2C0_SCL |
+
+### Power-on prohibition
+
+**GPIO1, GPIO3, GPIO4, GPIO6, GPIO9, GPIO11 must NOT be pulled high by hardware before power-on.** External pull-ups on these pins can prevent the chip from booting. Check schematics and remove pull-ups before power-on.
+
+### Choose pins by peripheral
+
+| Peripheral | Pin / Mode |
+|------------|-----------|
+| PWM0 | GPIO0 (Mode1), GPIO8 (Mode1), GPIO12 is PWM4 |
+| PWM1 | GPIO1 ⚠️, GPIO9 ⚠️ |
+| PWM2 | GPIO2, GPIO10 |
+| PWM3 | GPIO3 ⚠️, GPIO11 ⚠️ |
+| PWM4 | GPIO4 ⚠️, GPIO12 |
+| PWM5 | GPIO5 |
+| PWM6 | GPIO6 ⚠️ |
+| PWM7 | GPIO7 |
+| I2C0_SDA | UART0_TXD (Mode3) |
+| I2C0_SCL | UART0_RXD (Mode3) |
+| I2C1_SDA | UART1_TXD (Mode3) |
+| I2C1_SCL | UART1_RXD (Mode3) |
+| SPI0_CS0_N | GPIO10 (Mode3) |
+| SPI0_IN | GPIO11 ⚠️ (Mode4), GPIO5 (Mode5) |
+| SPI0_OUT | GPIO9 ⚠️ (Mode4), GPIO6 ⚠️ (Mode7) |
+| SPI0_SCK | GPIO7 (Mode3) |
+| SPI0_CS1_N | GPIO8 (Mode3) |
+| SPI1_CSN | GPIO0 (Mode4) |
+| SPI1_IO0 | GPIO1 ⚠️ (Mode3) |
+| SPI1_IO1 | GPIO3 ⚠️ (Mode3) |
+| SPI1_IO3 | GPIO2 (Mode3) |
+| SPI1_SCK | GPIO6 ⚠️ (Mode3) |
 
 **Always check the vendor IO mux table for the definitive mapping.**
 
