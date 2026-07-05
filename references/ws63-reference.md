@@ -28,11 +28,12 @@ Do NOT claim success from partial object-file compilation alone.
 | MAP | `output/ws63/acore/ws63-liteos-app/ws63-liteos-app.map` |
 | BIN | `output/ws63/acore/ws63-liteos-app/ws63-liteos-app.bin` |
 | **FWPKG (burn)** | `output/ws63/fwpkg/ws63-liteos-app/ws63-liteos-app_all.fwpkg` |
+| BIN (intermediate) | `output/ws63/acore/ws63-liteos-app/ws63-liteos-app.bin` |
 | LST | `output/ws63/acore/ws63-liteos-app/ws63-liteos-app.lst` |
 | MEM | `output/ws63/acore/ws63-liteos-app/ws63-liteos-app.mem` |
 | DU | `output/ws63/acore/ws63-liteos-app/ws63-liteos-app.du` |
 
-**The burn artifact is `.fwpkg`, not `.bin`.**
+**The burn artifact is `.fwpkg`, not `.bin`.** The `.fwpkg` is a packaged firmware image that includes partition tables, security headers, and board-specific metadata expected by the WS63 flash tool. The `.bin` is just a raw binary extracted from the ELF.**
 
 ## Good Local References
 
@@ -74,8 +75,22 @@ source code             ← #ifdef CONFIG_FOO
 | `.bin` treated as final artifact | SDK workflow expects `.fwpkg` | Use `ws63-liteos-app_all.fwpkg` |
 | `kconfiglib` / `windows-curses` missing | Python env issue, not firmware code | Report to user, do not auto-install |
 | Flash Init Fail 0x80001341 | Flash comm failure or security key issue | Check SPI timing, pin mux, key provisioning |
+| `close()` undefined | lwip environment uses `closesocket()` | Use `closesocket()` or include `lwip/sockets.h` |
+| CMakeLists macro mismatch | Kconfig symbol renamed, CMakeLists not updated | Grep CMakeLists.txt for old symbol name, update all |
+| Many undefined links from existing files | CMakeLists.txt condition silently false | Check `if(DEFINED CONFIG_*)` matches current Kconfig name |
 | Peripheral false-trigger at boot | GPIO4/5 default to SSI mode, not GPIO | Call `uapi_pin_set_mode()` in init code |
 | Font/text not displaying | No font compiled for the character set | Generate font file, add to CMakeLists SOURCES |
+
+## Serial Boot Log
+
+Standard parameters for reading boot logs:
+- **Baud rate**: 115200
+- **Data bits**: 8
+- **Stop bits**: 1
+- **Parity**: None
+- **Flow control**: None
+
+Connect a serial terminal with these parameters, reset the board, and observe the early boot messages for error codes.
 
 ## GPIO Mux Quick Reference
 
@@ -160,15 +175,53 @@ Dead files are typically leftover from a previous approach (e.g., old display dr
 
 ### Shared protocol files
 
-When multiple samples share a protocol header (e.g., `gateway_frame.h`), copy-paste leads to divergent versions. Extract to a common directory and add it to each sample's include path.
+When multiple samples share a protocol header, copy-paste leads to divergent versions. Extract to a common directory and add it to each sample's include path.
 
-### Font/tool artifacts in source tree
+### Tool artifacts in source tree
 
-Font conversion tools (e.g., `lv_font_conv`) leave `node_modules/` behind. Delete after generating `.c` files. Add to `.gitignore`.
+Build tools (e.g., font generators, code generators) leave temporary files behind. Delete after generating source files. Add tool directories to `.gitignore`.
 
 ### Placeholder sensor data
 
 When a UI field has no real sensor, do not fill it with unrelated data. Show "N/A" or use a clearly invalid sentinel value.
+
+## Multi-Device Connection State Machine Pattern
+
+When implementing a coordinator/gateway that connects to multiple peripheral devices:
+
+### State machine rules
+
+1. **Scan only when a slot is free**: Do not start scanning if all connection slots are occupied.
+2. **Do not re-scan an already-connected device**: Track connected addresses and skip them.
+3. **Defer new scan requests**: If a scan is already active, queue the request instead of starting a duplicate.
+4. **Auto-rescan on disconnect**: When a device disconnects and a slot frees up, restart scanning if there are pending devices.
+5. **Limit connection attempts**: Try each candidate address a bounded number of times before giving up.
+
+### Pseudo-code pattern
+
+```c
+// Connection manager state
+typedef enum {
+    SCAN_IDLE,
+    SCAN_ACTIVE,
+    CONNECTING,
+    CONNECTED,
+    DISCONNECTED
+} conn_state_t;
+
+// Rules:
+// - SCAN_IDLE → start scan if pending_count > 0 AND free_slots > 0
+// - SCAN_ACTIVE → on new device found, check if already connected, if not → CONNECTING
+// - CONNECTING → on success → CONNECTED, on fail → back to SCAN_ACTIVE
+// - DISCONNECTED → increment free_slots, trigger SCAN_IDLE check
+```
+
+### Common pitfalls
+
+- **Scanning without checking free slots**: Leads to overflow when more devices than slots are present.
+- **Not de-duplicating scan results**: Connecting to the same device twice wastes slots.
+- **No rescan on disconnect**: If a device drops and another is waiting, the waiting device never gets connected.
+- **Blocking the main loop**: Connection state machines must be non-blocking; use timers and events.
 
 ## Agent Workflow Checklist
 
